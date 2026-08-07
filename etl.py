@@ -143,6 +143,9 @@ def get_supabase_client() -> Client:
     url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
     key = os.environ.get("SUPABASE_KEY", "").strip()
 
+    # In ra log xem GitHub thực sự đọc được URL là gì
+    log.info(f"SUPABASE_URL value: '{url}'")
+
     if not url or not key:
         raise EnvironmentError(
             "SUPABASE_URL and SUPABASE_KEY must be set in Environment / Secrets"
