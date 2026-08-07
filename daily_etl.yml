@@ -1,0 +1,28 @@
+name: Daily VN Stock ETL
+
+on:
+  schedule:
+    # 09:15 Vietnam time (UTC+7) = 02:15 UTC, after market open (09:00 ICT)
+    - cron: "15 2 * * 1-5"   # Mon–Fri only (no VN market on weekends)
+  workflow_dispatch: {}       # lets you trigger it manually from the Actions tab
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ETL
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python etl.py
