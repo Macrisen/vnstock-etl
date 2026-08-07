@@ -4,43 +4,32 @@ VN Stock Price ETL
 Extracts daily OHLCV price data for a list of Vietnamese stock tickers
 (via the vnstock library), computes a few derived indicators, and loads
 the result into a Supabase (Postgres) table.
-
-Designed to run daily via GitHub Actions (see .github/workflows/daily_etl.yml)
-or manually: `python etl.py`
-
-Env vars required (see .env.example):
-    SUPABASE_URL       - your Supabase project URL
-    SUPABASE_KEY       - service_role or anon key with insert/upsert rights
 """
 
 import os
 import sys
 import logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-#load_dotenv()  # reads .env in the current folder and always wins,
-                # even if a stray empty SUPABASE_URL/KEY is already set in the
-                # shell session (local runs only — GitHub Actions injects
-                # secrets as real env vars instead, .env is not used there)
+# Tải biến môi trường ở local (trên GitHub Actions đã có secrets hệ thống)
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-TICKERS = ["FPT","ACB","MWG","HPG","VNM", "VCB","BID", "MWG","SHS","VIX","GAS"]  # edit this list as you like
-LOOKBACK_DAYS = 30          # how many days of history to (re)fetch each run
-                             # (used only when BACKFILL_START_DATE is None)
+# Loại bỏ mã MWG bị lặp
+TICKERS = list(dict.fromkeys(["FPT", "ACB", "MWG", "HPG", "VNM", "VCB", "BID", "SHS", "VIX", "GAS"]))
+LOOKBACK_DAYS = 30          
 
-BACKFILL_START_DATE = None  # set a fixed "YYYY-MM-DD" to backfill from
-                             # that date instead of using LOOKBACK_DAYS.
-                             # Set back to None once your backfill run is done,
-                             # so daily automated runs stay fast (last 30 days
-                             # only) instead of re-fetching the full history
-                             # every single day.
+# ĐẶT TỪ 01/06/2026 ĐỂ CÀO TOÀN BỘ LỊCH SỬ TỪ THÁNG 6 ĐẾN NAY
+BACKFILL_START_DATE = "2026-06-01"  # Xong đợt backfill này bạn có thể sửa lại thành None
+
 TABLE_NAME = "stock_prices"
 
 logging.basicConfig(
@@ -51,7 +40,7 @@ log = logging.getLogger("vn-stock-etl")
 
 
 # ---------------------------------------------------------------------------
-# Extract
+# Extract (Chạy Đa luồng)
 # ---------------------------------------------------------------------------
 
 def fetch_price_history(ticker: str, start: str, end: str) -> pd.DataFrame:
@@ -78,12 +67,21 @@ def extract(tickers: list[str], lookback_days: int) -> pd.DataFrame:
         start = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     frames = []
-    for t in tickers:
-        try:
-            frames.append(fetch_price_history(t, start, end))
-        except Exception as e:
-            # One bad ticker shouldn't kill the whole pipeline
-            log.error(f"Failed to fetch {t}: {e}")
+    # CÀO ĐA LUỒNG: Chạy tối đa 5 mã cùng một lúc
+    max_workers = min(5, len(tickers))
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_ticker = {
+            executor.submit(fetch_price_history, t, start, end): t for t in tickers
+        }
+        for future in as_completed(future_to_ticker):
+            t = future_to_ticker[future]
+            try:
+                df = future.result()
+                if not df.empty:
+                    frames.append(df)
+            except Exception as e:
+                log.error(f"Failed to fetch {t}: {e}")
 
     if not frames:
         raise RuntimeError("No data fetched for any ticker — aborting.")
@@ -98,12 +96,11 @@ def extract(tickers: list[str], lookback_days: int) -> pd.DataFrame:
 def transform(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.copy()
 
-    # vnstock returns columns: time, open, high, low, close, volume
     df["time"] = pd.to_datetime(df["time"]).dt.date
     df = df.drop_duplicates(subset=["ticker", "time"])
     df = df.sort_values(["ticker", "time"])
 
-    # Derived indicators — the kind of feature engineering an analyst would want
+    # Derived indicators
     df["daily_return_pct"] = (
         df.groupby("ticker")["close"].pct_change() * 100
     ).round(2)
@@ -128,7 +125,6 @@ def transform(raw: pd.DataFrame) -> pd.DataFrame:
     ]
     df = df[cols]
 
-    # Supabase/JSON needs native python types, not numpy/NaT
     df = df.astype(object).where(pd.notnull(df), None)
     df["trade_date"] = df["trade_date"].astype(str)
 
@@ -143,9 +139,6 @@ def get_supabase_client() -> Client:
     url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
     key = os.environ.get("SUPABASE_KEY", "").strip()
 
-    # In ra log xem GitHub thực sự đọc được URL là gì
-    log.info(f"SUPABASE_URL value: '{url}'")
-
     if not url or not key:
         raise EnvironmentError(
             "SUPABASE_URL and SUPABASE_KEY must be set in Environment / Secrets"
@@ -158,8 +151,6 @@ def load(df: pd.DataFrame, client: Client) -> None:
     records = df.to_dict(orient="records")
     log.info(f"Upserting {len(records)} rows into '{TABLE_NAME}'")
 
-    # Upsert on (ticker, trade_date) so re-running the ETL is idempotent
-    # instead of creating duplicate rows.
     batch_size = 500
     for i in range(0, len(records), batch_size):
         batch = records[i : i + batch_size]
