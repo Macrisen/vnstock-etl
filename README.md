@@ -35,18 +35,18 @@ vnstock API ──> extract() ──> transform() ──> Supabase (Postgres) �
 | Orchestration | GitHub Actions (scheduled cron)|
 | Warehouse     | Postgres (Supabase-hosted)     |
 
-## Setup
+## Setup (for Mac)
 
 1. Create a free [Supabase](https://supabase.com) project.
 2. Run `schema.sql` in the Supabase SQL editor to create the `stock_prices` table.
 3. Copy `.env.example` to `.env` and fill in your Supabase URL + key (for local runs).
 4. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   pip3 install -r requirements.txt
    ```
 5. Run locally:
    ```bash
-   python etl.py
+   python3 etl.py
    ```
 
 ## Running it automatically (GitHub Actions)
