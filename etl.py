@@ -22,7 +22,7 @@ import pandas as pd
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-load_dotenv()  # reads .env in the current folder and always wins,
+#load_dotenv()  # reads .env in the current folder and always wins,
                 # even if a stray empty SUPABASE_URL/KEY is already set in the
                 # shell session (local runs only — GitHub Actions injects
                 # secrets as real env vars instead, .env is not used there)
