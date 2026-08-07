@@ -8,7 +8,7 @@ built to practice real ETL/orchestration concepts beyond one-off notebooks.
 
 Each weekday, the pipeline:
 1. **Extracts** daily OHLCV price history for a configurable list of tickers
-   (FPT, HPG, VNM, VCB, MWG by default) via the `vnstock` library.
+   (FPT, ACB, MWG, HPG, VNM, VCB, MWG, SHS, VIX, GAS by default) via the `vnstock` library.
 2. **Transforms** the raw data: cleans duplicates, and derives daily return %,
    7-day moving average, and 7-day rolling volatility per ticker.
 3. **Loads** the result into a Supabase (Postgres) table using an idempotent
