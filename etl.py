@@ -140,12 +140,14 @@ def transform(raw: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def get_supabase_client() -> Client:
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
+    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+
     if not url or not key:
         raise EnvironmentError(
-            "SUPABASE_URL and SUPABASE_KEY must be set (see .env.example)"
+            "SUPABASE_URL and SUPABASE_KEY must be set in Environment / Secrets"
         )
+
     return create_client(url, key)
 
 
