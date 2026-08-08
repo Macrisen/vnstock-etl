@@ -26,8 +26,8 @@ load_dotenv()
 TICKERS = list(dict.fromkeys(["FPT", "ACB", "MWG", "HPG", "VNM", "VCB", "BID", "SHS", "VIX", "GAS"]))
 LOOKBACK_DAYS = 30          
 
-# ĐẶT TỪ 01/06/2026 ĐỂ CÀO TOÀN BỘ LỊCH SỬ TỪ THÁNG 6 ĐẾN NAY
-BACKFILL_START_DATE = "2026-06-01"  # Xong đợt backfill này bạn có thể sửa lại thành None
+
+BACKFILL_START_DATE = "2026-06-01" 
 
 TABLE_NAME = "stock_prices"
 
