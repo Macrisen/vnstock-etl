@@ -66,7 +66,7 @@ def extract(tickers: list[str], lookback_days: int) -> pd.DataFrame:
         start = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     frames = []
-    # CÀO ĐA LUỒNG: Chạy tối đa 5 mã cùng một lúc
+    #Scratch multiple data
     max_workers = min(5, len(tickers))
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
