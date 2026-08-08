@@ -16,14 +16,13 @@ import pandas as pd
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-# Tải biến môi trường ở local (trên GitHub Actions đã có secrets hệ thống)
 load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-# Loại bỏ mã MWG bị lặp
+
 TICKERS = list(dict.fromkeys(["FPT", "ACB", "MWG", "HPG", "VNM", "VCB", "BID", "SHS", "VIX", "GAS"]))
 LOOKBACK_DAYS = 30          
 
