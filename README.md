@@ -1,67 +1,44 @@
-# VN Stock Price ETL Pipeline
+# 📈 VN Stock Price ETL & Dashboard Pipeline
 
-Automated daily pipeline that extracts Vietnamese stock price data, computes
-basic trading indicators, and loads it into a Postgres (Supabase) warehouse —
-built to practice real ETL/orchestration concepts beyond one-off notebooks.
+An automated daily ETL pipeline that extracts Vietnamese stock price data, computes key trading indicators, stores them in a Postgres (Supabase) warehouse, and visualizes them on an interactive Streamlit Web Dashboard.
 
-## Overview
+🔗 **[Live Demo App](https://vnstock-etl-mpmgx6ztsvtsqynzemor4z.streamlit.app/)**
 
-Each weekday, the pipeline:
-1. **Extracts** daily OHLCV price history for a configurable list of tickers
-   (FPT, ACB, MWG, HPG, VNM, VCB, MWG, SHS, VIX, GAS by default) via the `vnstock` library.
-2. **Transforms** the raw data: cleans duplicates, and derives daily return %,
-   7-day moving average, and 7-day rolling volatility per ticker.
-3. **Loads** the result into a Supabase (Postgres) table using an idempotent
-   upsert (`ticker`, `trade_date` as composite key), so re-running the job
-   never creates duplicate rows.
-4. **Orchestrates** automatically via a GitHub Actions cron schedule
-   (weekdays, shortly after VN market open) — no manual trigger needed.
+---
 
-## Architecture
+## 🌟 Features
 
-```
-vnstock API ──> extract() ──> transform() ──> Supabase (Postgres) ──> BI tool
-                                                     ^
-                                    GitHub Actions cron (daily, Mon–Fri)
-```
+* **Automated Data Extraction:** Fetches daily OHLCV price history for key tickers (FPT, ACB, MWG, HPG, VNM, VCB, SHS, VIX, GAS, etc.) via `vnstock`.
+* **Data Transformation:** Cleans duplicates, computes daily returns (%), 7-day Moving Averages (MA7), and rolling metrics using `pandas`.
+* **Idempotent Storage:** Upserts transformed data into a Supabase (Postgres) table using `(ticker, trade_date)` as a composite primary key to prevent duplicate records.
+* **Scheduled Orchestration:** Runs automatically on weekdays via GitHub Actions (scheduled cron job).
+* **Interactive Dashboard:** Built with Streamlit and Plotly for real-time stock visualization, dark-mode charts, and customizable indicator filters.
 
-## Tech stack
+---
 
-| Stage         | Tool                          |
-|---------------|--------------------------------|
-| Extract       | Python, `vnstock`              |
-| Transform     | pandas                         |
-| Load          | Supabase (Postgres), `supabase-py` |
-| Orchestration | GitHub Actions (scheduled cron)|
-| Warehouse     | Postgres (Supabase-hosted)     |
+## 🏗️ Architecture
+vnstock API ──> extract() ──> transform() ──> Supabase (Postgres) ──> Streamlit Dashboard
+^                          (Live Web App)
+GitHub Actions Cron (Daily, Mon–Fri)
+---
 
-## Setup (for Mac)
+## 🛠️ Tech Stack
 
-1. Create a free [Supabase](https://supabase.com) project.
-2. Run `schema.sql` in the Supabase SQL editor to create the `stock_prices` table.
-3. Copy `.env.example` to `.env` and fill in your Supabase URL + key (for local runs).
-4. Install dependencies:
-   ```bash
-   pip3 install -r requirements.txt
-   ```
-5. Run locally:
-   ```bash
-   python3 etl.py
-   ```
+| Component | Technology |
+| :--- | :--- |
+| **Extract & Transform** | Python 3.14, `pandas`, `vnstock` |
+| **Data Warehouse** | Supabase (Hosted Postgres) |
+| **Orchestration** | GitHub Actions (Scheduled Cron) |
+| **Visualization** | Streamlit, Plotly |
 
-## Running it automatically (GitHub Actions)
+---
 
-1. Push this repo to GitHub.
-2. In the repo settings, add two secrets: `SUPABASE_URL` and `SUPABASE_KEY`.
-3. The workflow in `.github/workflows/daily_etl.yml` will run automatically
-   on weekdays, or you can trigger it manually from the **Actions** tab.
+## 🚀 Local Setup
 
-## Possible next steps
+### 1. Clone & Dependencies
+```bash
+git clone [https://github.com/Macrisen/vnstock-etl.git](https://github.com/Macrisen/vnstock-etl.git)
+cd vnstock-etl
 
-- Add a Streamlit or Power BI dashboard on top of the `stock_prices` table.
-- Add data-quality checks (e.g. flag missing trading days, price outliers).
-- Extend to fundamental data (P/E, ROE) for a valuation-screening view.
-
-## Disclaimer
-
-For educational/portfolio purposes only — not investment advice.
+# Install requirements
+pip3 install -r requirements.txt
