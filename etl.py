@@ -1,181 +1,99 @@
-"""
-VN Stock Price ETL
-------------------
-Extracts daily OHLCV price data for a list of Vietnamese stock tickers
-(via the vnstock library), computes a few derived indicators, and loads
-the result into a Supabase (Postgres) table.
-"""
-
 import os
-import sys
-import logging
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import logging
 import pandas as pd
-from supabase import create_client, Client
+import requests
+from supabase import create_client
 from dotenv import load_dotenv
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
+# 1. Kết nối Supabase
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Missing SUPABASE_URL or SUPABASE_KEY in environment variables.")
 
-TICKERS = list(dict.fromkeys(["FPT", "ACB", "MWG", "HPG", "VNM", "VCB", "BID", "SHS", "VIX", "GAS"]))
-LOOKBACK_DAYS = 30          
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# 2. Danh sách 10 mã cổ phiếu
+TICKERS = ["FPT", "MWG", "VCB", "HPG", "TCB", "SSI", "VHM", "VIC", "MSN", "MBB"]
 
-BACKFILL_START_DATE = "2026-06-01" 
-
-TABLE_NAME = "stock_prices"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-log = logging.getLogger("vn-stock-etl")
-
-
-# ---------------------------------------------------------------------------
-# Extract (Chạy Đa luồng)
-# ---------------------------------------------------------------------------
-
-def fetch_price_history(ticker: str, start: str, end: str) -> pd.DataFrame:
-    """Pull daily OHLCV history for one ticker from vnstock (VCI source)."""
-    from vnstock.explorer.vci import Quote
-
-    log.info(f"Fetching {ticker} from {start} to {end}")
-    q = Quote(symbol=ticker, show_log=False)
-    df = q.history(start=start, end=end, interval="1D")
-
-    if df is None or df.empty:
-        log.warning(f"No data returned for {ticker}")
-        return pd.DataFrame()
-
-    df["ticker"] = ticker
-    return df
-
-
-def extract(tickers: list[str], lookback_days: int) -> pd.DataFrame:
-    end = datetime.today().strftime("%Y-%m-%d")
-    if BACKFILL_START_DATE:
-        start = BACKFILL_START_DATE
-    else:
-        start = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-
-    frames = []
-    #Scratch multiple data
-    max_workers = min(5, len(tickers))
+def fetch_ticker_data(ticker: str, days: int = 180) -> pd.DataFrame:
+    """Lấy dữ liệu từ DNSE API (không chặn IP quốc tế)."""
+    end_dt = datetime.now()
+    start_dt = end_dt - timedelta(days=days)
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_ticker = {
-            executor.submit(fetch_price_history, t, start, end): t for t in tickers
-        }
-        for future in as_completed(future_to_ticker):
-            t = future_to_ticker[future]
-            try:
-                df = future.result()
-                if not df.empty:
-                    frames.append(df)
-            except Exception as e:
-                log.error(f"Failed to fetch {t}: {e}")
+    from_ts = int(start_dt.timestamp())
+    to_ts = int(end_dt.timestamp())
+    
+    url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?from={from_ts}&to={to_ts}&symbol={ticker}&resolution=1D"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            if "t" in data and len(data["t"]) > 0:
+                df = pd.DataFrame({
+                    "trade_date": [datetime.fromtimestamp(ts).strftime("%Y-%m-%d") for ts in data["t"]],
+                    "open": data["o"],
+                    "high": data["h"],
+                    "low": data["l"],
+                    "close": data["c"],
+                    "volume": data["v"],
+                    "ticker": ticker
+                })
+                return df
+    except Exception as e:
+        logging.error(f"Error fetching {ticker}: {e}")
+    return pd.DataFrame()
+def transform_data(df: pd.DataFrame) -> pd.DataFrame:
+  """Tính toán các chỉ báo kỹ thuật và loại bỏ hoàn toàn giá trị null."""
+  df = df.sort_values("trade_date").reset_index(drop=True)
 
-    if not frames:
-        raise RuntimeError("No data fetched for any ticker — aborting.")
+  # 1. Tính Daily Return Pct (Dòng đầu tiên được gán bằng 0.0 thay vì NaN)
+  df["daily_return_pct"] = (
+      (df["close"].pct_change() * 100).round(2).fillna(0.0)
+  )
 
-    return pd.concat(frames, ignore_index=True)
+  # 2. Tính MA7 với min_periods=1 (Có bao nhiêu phiên tính bấy nhiêu, không bị null)
+  df["ma7"] = df["close"].rolling(window=7, min_periods=1).mean().round(2)
 
+  # 3. Tính Volatility 7D (Độ lệch chuẩn 7 ngày, dòng đầu điền 0.0)
+  df["volatility_7d"] = (
+      df["daily_return_pct"].rolling(window=7, min_periods=1).std().round(2)
+  )
+  df["volatility_7d"] = df["volatility_7d"].fillna(0.0)
 
-# ---------------------------------------------------------------------------
-# Transform
-# ---------------------------------------------------------------------------
+  # 4. Chốt chặn cuối: Thay thế mọi giá trị NaN còn sót lại bằng giá trị phù hợp
+  df["ma7"] = df["ma7"].fillna(df["close"])
 
-def transform(raw: pd.DataFrame) -> pd.DataFrame:
-    df = raw.copy()
-
-    df["time"] = pd.to_datetime(df["time"]).dt.date
-    df = df.drop_duplicates(subset=["ticker", "time"])
-    df = df.sort_values(["ticker", "time"])
-
-    # Derived indicators
-    df["daily_return_pct"] = (
-        df.groupby("ticker")["close"].pct_change() * 100
-    ).round(2)
-
-    df["ma7"] = (
-        df.groupby("ticker")["close"]
-        .transform(lambda s: s.rolling(window=7, min_periods=1).mean())
-        .round(2)
-    )
-
-    df["volatility_7d"] = (
-        df.groupby("ticker")["daily_return_pct"]
-        .transform(lambda s: s.rolling(window=7, min_periods=2).std())
-        .round(2)
-    )
-
-    df = df.rename(columns={"time": "trade_date"})
-
-    cols = [
-        "ticker", "trade_date", "open", "high", "low", "close", "volume",
-        "daily_return_pct", "ma7", "volatility_7d",
-    ]
-    df = df[cols]
-
-    df = df.astype(object).where(pd.notnull(df), None)
-    df["trade_date"] = df["trade_date"].astype(str)
-
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Load
-# ---------------------------------------------------------------------------
-
-def get_supabase_client() -> Client:
-    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-    key = os.environ.get("SUPABASE_KEY", "").strip()
-
-    if not url or not key:
-        raise EnvironmentError(
-            "SUPABASE_URL and SUPABASE_KEY must be set in Environment / Secrets"
-        )
-
-    return create_client(url, key)
-
-
-def load(df: pd.DataFrame, client: Client) -> None:
+  return df
+def upsert_to_supabase(df: pd.DataFrame):
+    """Đẩy dữ liệu vào bảng stock_prices (Upsert dựa trên ticker + trade_date)."""
     records = df.to_dict(orient="records")
-    log.info(f"Upserting {len(records)} rows into '{TABLE_NAME}'")
+    # Upsert giúp cập nhật nếu ngày đó đã tồn tại hoặc thêm mới nếu chưa có
+    supabase.table("stock_prices").upsert(records, on_conflict="ticker,trade_date").execute()
 
-    batch_size = 500
-    for i in range(0, len(records), batch_size):
-        batch = records[i : i + batch_size]
-        client.table(TABLE_NAME).upsert(
-            batch, on_conflict="ticker,trade_date"
-        ).execute()
-
-    log.info("Load complete.")
-
-
-# ---------------------------------------------------------------------------
-# Pipeline entrypoint
-# ---------------------------------------------------------------------------
-
-def run() -> None:
-    log.info(f"Starting ETL for tickers: {TICKERS}")
-    raw = extract(TICKERS, LOOKBACK_DAYS)
-    clean = transform(raw)
-    client = get_supabase_client()
-    load(clean, client)
-    log.info(f"Done. {len(clean)} rows processed across {clean['ticker'].nunique()} tickers.")
-
+def main():
+    logging.info("Starting Daily Stock ETL Pipeline...")
+    total_records = 0
+    
+    for ticker in TICKERS:
+        logging.info(f"Processing {ticker}...")
+        raw_df = fetch_ticker_data(ticker)
+        if not raw_df.empty:
+            clean_df = transform_data(raw_df)
+            upsert_to_supabase(clean_df)
+            total_records += len(clean_df)
+            logging.info(f"Upserted {len(clean_df)} rows for {ticker}")
+        else:
+            logging.warning(f"No data fetched for {ticker}")
+            
+    logging.info(f"ETL completed! Total records processed: {total_records}")
 
 if __name__ == "__main__":
-    try:
-        run()
-    except Exception as e:
-        log.error(f"ETL failed: {e}")
-        sys.exit(1)
+    main()
