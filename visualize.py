@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Steamlit config 
+# Streamlit config 
 st.set_page_config(
     page_title="VN Stock Dashboard",
     layout="wide"
@@ -60,11 +60,11 @@ def init_supabase():
         st.stop()
     return create_client(url, key)
 
-# Supabase load data
+# Supabase load data (Đã nâng limit lên 10.000 dòng để lấy đủ 20 mã)
 @st.cache_data(ttl=300) 
 def load_data():
     supabase = init_supabase()
-    response = supabase.table("stock_prices").select("*").execute()
+    response = supabase.table("stock_prices").select("*").limit(10000).execute()
     df = pd.DataFrame(response.data)
     
     if not df.empty:
@@ -135,7 +135,6 @@ fig.add_trace(
 
 # 2. Bollinger Bands
 if show_bb and "bb_upper" in df.columns and "bb_lower" in df.columns:
-    # Dải trên
     fig.add_trace(
         gg.Scatter(
             x=df['trade_date'], y=df['bb_upper'],
@@ -143,7 +142,6 @@ if show_bb and "bb_upper" in df.columns and "bb_lower" in df.columns:
             name="BB Upper"
         ), row=1, col=1
     )
-    # Dải dưới kèm tô bóng
     fig.add_trace(
         gg.Scatter(
             x=df['trade_date'], y=df['bb_lower'],
