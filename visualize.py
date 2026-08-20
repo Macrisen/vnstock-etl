@@ -17,13 +17,10 @@ st.set_page_config(
 # CSS Custom
 st.markdown("""
     <style>
-    /* Tiêu đề chính chữ mảnh, thanh thoát */
     h1 {
         font-weight: 400 !important; 
         letter-spacing: -0.5px;
     }
-
-    /* Các thẻ Metric bằng chiều cao nhau */
     div[data-testid="stMetric"] {
         background-color: #1e222d;
         border: 1px solid #2a2e39;
@@ -35,14 +32,10 @@ st.markdown("""
         flex-direction: column;
         justify-content: center;
     }
-    
-    /* Font số Metric mảnh đẹp */
     div[data-testid="stMetricValue"] {
         font-size: 28px !important;
         font-weight: 300 !important;
     }
-    
-    /* Font tiêu đề Metric */
     div[data-testid="stMetricLabel"] {
         font-weight: 400 !important;
         color: #8f96a3 !important;
@@ -60,31 +53,41 @@ def init_supabase():
         st.stop()
     return create_client(url, key)
 
-# Supabase load data (Đã nâng limit lên 10.000 dòng để lấy đủ 20 mã)
-@st.cache_data(ttl=300) 
-def load_data():
+# 1. Lấy danh sách 20 mã cổ phiếu
+@st.cache_data(ttl=300)
+def get_all_tickers():
     supabase = init_supabase()
-    response = supabase.table("stock_prices").select("*").limit(10000).execute()
+    response = supabase.table("stock_prices").select("ticker").limit(5000).execute()
     df = pd.DataFrame(response.data)
-    
+    if not df.empty:
+        return sorted(df["ticker"].unique().tolist())
+    return ["ACB", "FPT", "HPG", "MBB", "MWG", "SSI", "TCB", "VCB", "VHM", "VIC"]
+
+# 2. Query riêng mã được chọn (Đảm bảo lấy trọn vẹn 100% các phiên của mã đó)
+@st.cache_data(ttl=60)
+def load_ticker_data(ticker: str):
+    supabase = init_supabase()
+    response = (
+        supabase.table("stock_prices")
+        .select("*")
+        .eq("ticker", ticker)
+        .order("trade_date", desc=False)
+        .limit(1000)
+        .execute()
+    )
+    df = pd.DataFrame(response.data)
     if not df.empty:
         df["trade_date"] = pd.to_datetime(df["trade_date"])
-        df = df.sort_values("trade_date")
+        df = df.sort_values("trade_date").reset_index(drop=True)
     return df
 
 # Main Header
 st.title("📈 20 Tickers VNStock Market Dashboard")
 st.caption("Data source: Supabase")
 
-df_all = load_data()
-
-if df_all.empty:
-    st.warning("No data available in the Supabase database.")
-    st.stop()
-
 # Sidebar: Lọc mã cổ phiếu
 st.sidebar.header("🔍 Data filter")
-tickers = sorted(df_all["ticker"].unique())
+tickers = get_all_tickers()
 selected_ticker = st.sidebar.selectbox("Choose a ticker:", tickers)
 
 # Sidebar: Bật/tắt Chỉ báo Kỹ thuật
@@ -96,8 +99,13 @@ show_ma50 = st.sidebar.checkbox("MA50", value=True)
 show_ma100 = st.sidebar.checkbox("MA100", value=False)
 show_ma200 = st.sidebar.checkbox("MA200", value=False)
 
-# Lọc dữ liệu theo mã được chọn
-df = df_all[df_all["ticker"] == selected_ticker].copy()
+# Load dữ liệu của ticker được chọn
+df = load_ticker_data(selected_ticker)
+
+if df.empty:
+    st.warning(f"No data available for ticker {selected_ticker}.")
+    st.stop()
+
 latest_row = df.iloc[-1]
 prev_row = df.iloc[-2] if len(df) > 1 else latest_row
 
@@ -196,6 +204,6 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Bảng chi tiết dữ liệu
+# Bảng chi tiết dữ liệu (sắp xếp giảm dần theo ngày)
 with st.expander("📄 Detail Data"):
     st.dataframe(df.sort_values("trade_date", ascending=False), use_container_width=True)
