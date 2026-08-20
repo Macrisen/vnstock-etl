@@ -17,3 +17,10 @@ create table if not exists stock_prices (
 
 create index if not exists idx_stock_prices_ticker_date
     on stock_prices (ticker, trade_date desc);
+ALTER TABLE stock_prices
+ADD COLUMN IF NOT EXISTS ma20 NUMERIC,
+ADD COLUMN IF NOT EXISTS ma50 NUMERIC,
+ADD COLUMN IF NOT EXISTS ma100 NUMERIC,
+ADD COLUMN IF NOT EXISTS ma200 NUMERIC,
+ADD COLUMN IF NOT EXISTS bb_upper NUMERIC,
+ADD COLUMN IF NOT EXISTS bb_lower NUMERIC;
